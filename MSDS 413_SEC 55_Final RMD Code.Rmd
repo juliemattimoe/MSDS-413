@@ -1,0 +1,211 @@
+---
+title: "MSD S413 SEC 55 Final"
+author: "Julie Mattimoe"
+date: "March 17, 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load packages
+library(corrplot)
+library(dplyr)
+library(fpp)
+library(forecast)
+library(foreach)
+library(gbm)
+library(glmnet)
+library(kernlab)
+library(MASS)
+library(Matrix)
+library(Metrics)
+library(mgcv)
+library(neuralnet)
+library(plyr)
+library(pscl)
+library(psych)
+library(randomForest)
+library(readr)
+library(rpart)
+
+# Load data 
+Train <- read.csv("C:/Users/Julie/Desktop/MSDS 413/Final/dengue_features_train.csv", sep = ",")
+TrLabel <- read.csv("C:/Users/Julie/Desktop/MSDS 413/Final/dengue_labels_train.csv", sep = ",")
+Test <- read.csv("C:/Users/Julie/Desktop/MSDS 413/Final/dengue_features_test.csv", sep = ",")
+Output <- read.csv("C:/Users/Julie/Desktop/MSDS 413/Final/submission_format.csv", check.names=FALSE)
+
+# Join the features train and labels train
+Train$total_cases <- TrLabel$total_cases
+summary(Train)
+```
+
+```{r}
+# Exploratory Data Analysis
+
+str(Train)
+
+# Begin by Assess missing values
+sapply(Train, function(Train) sum(is.na(Train)))
+
+# Variable Observation is NA and replace it with MEDIAN
+Train$ndvi_ne[is.na(Train$ndvi_ne)==T] <- median(Train$ndvi_ne, na.rm = TRUE)
+Train$ndvi_nw[is.na(Train$ndvi_nw)==T] <- median(Train$ndvi_nw, na.rm = TRUE)
+Train$ndvi_se[is.na(Train$ndvi_se)==T] <- median(Train$ndvi_se, na.rm = TRUE)
+Train$ndvi_sw[is.na(Train$ndvi_sw)==T] <- median(Train$ndvi_sw, na.rm = TRUE)
+Train$precipitation_amt_mm[is.na(Train$precipitation_amt_mm)==T] <- median(Train$precipitation_amt_mm, na.rm = TRUE)
+Train$reanalysis_air_temp_k[is.na(Train$reanalysis_air_temp_k)==T] <- median(Train$reanalysis_air_temp_k, na.rm = TRUE)
+Train$reanalysis_avg_temp_k[is.na(Train$reanalysis_avg_temp_k)==T] <- median(Train$reanalysis_avg_temp_k, na.rm = TRUE)
+Train$reanalysis_dew_point_temp_k[is.na(Train$reanalysis_dew_point_temp_k)==T] <- median(Train$reanalysis_dew_point_temp_k, na.rm = TRUE)
+Train$reanalysis_max_air_temp_k[is.na(Train$reanalysis_max_air_temp_k)==T] <- median(Train$reanalysis_max_air_temp_k, na.rm = TRUE)
+Train$reanalysis_min_air_temp_k[is.na(Train$reanalysis_min_air_temp_k)==T] <- median(Train$reanalysis_min_air_temp_k, na.rm = TRUE)
+Train$reanalysis_precip_amt_kg_per_m2[is.na(Train$reanalysis_precip_amt_kg_per_m2)==T] <- median(Train$reanalysis_precip_amt_kg_per_m2, na.rm = TRUE)
+Train$reanalysis_relative_humidity_percent[is.na(Train$reanalysis_relative_humidity_percent)==T] <- median(Train$reanalysis_relative_humidity_percent, na.rm = TRUE)
+Train$reanalysis_sat_precip_amt_mm[is.na(Train$reanalysis_sat_precip_amt_mm)==T] <- median(Train$reanalysis_sat_precip_amt_mm, na.rm = TRUE)
+Train$reanalysis_specific_humidity_g_per_kg[is.na(Train$reanalysis_specific_humidity_g_per_kg)==T] <- median(Train$reanalysis_specific_humidity_g_per_kg, na.rm = TRUE)
+Train$reanalysis_tdtr_k[is.na(Train$reanalysis_tdtr_k)==T] <- median(Train$reanalysis_tdtr_k, na.rm = TRUE)
+Train$station_avg_temp_c[is.na(Train$station_avg_temp_c)==T] <- median(Train$station_avg_temp_c, na.rm = TRUE)
+Train$station_diur_temp_rng_c[is.na(Train$station_diur_temp_rng_c)==T] <- median(Train$station_diur_temp_rng_c, na.rm = TRUE)
+Train$station_max_temp_c[is.na(Train$station_max_temp_c)==T] <- median(Train$station_max_temp_c, na.rm = TRUE)
+Train$station_min_temp_c[is.na(Train$station_min_temp_c)==T] <- median(Train$station_min_temp_c, na.rm = TRUE)
+Train$station_precip_mm[is.na(Train$station_precip_mm)==T] <- median(Train$station_precip_mm, na.rm = TRUE)
+
+hist(Train$ndvi_ne)
+hist(Train$ndvi_nw)
+hist(Train$ndvi_se)
+hist(Train$ndvi_sw)
+hist(Train$precipitation_amt_mm)
+hist(Train$reanalysis_air_temp_k)
+hist(Train$reanalysis_avg_temp_k)
+hist(Train$reanalysis_dew_point_temp_k)
+hist(Train$reanalysis_max_air_temp_k)
+hist(Train$reanalysis_min_air_temp_k)
+hist(Train$reanalysis_precip_amt_kg_per_m2)
+hist(Train$reanalysis_relative_humidity_percent)
+hist(Train$reanalysis_sat_precip_amt_mm)
+hist(Train$reanalysis_specific_humidity_g_per_kg)
+hist(Train$reanalysis_tdtr_k)
+hist(Train$station_avg_temp_c)
+hist(Train$station_diur_temp_rng_c)
+hist(Train$station_max_temp_c)
+hist(Train$station_min_temp_c)
+hist(Train$station_precip_mm)
+
+# for the binomial model, choosing variables to include  
+correlation <- names(Train) %in% c("ndvi_nw","ndvi_sw","reanalysis_min_air_temp_k",
+                                   "reanalysis_air_temp_k","ndvi_ne","station_min_temp_c",
+                                   "ndvi_se","station_diur_temp_rng_c","reanalysis_tdtr_k",
+                                   "reanalysis_avg_temp_k","reanalysis_specific_humidity_g_per_kg",
+                                   "reanalysis_dew_point_temp_k","precipitation_amt_mm","station_avg_temp_c",
+                                   "reanalysis_max_air_temp_k","reanalysis_relative_humidity_percent")
+correlation1 <- Train[correlation]
+cor(Train$total_cases, correlation1, method = c("pearson", "kendall", "spearman"))
+```
+
+```{r}
+# Repeat the same cleaning on the test set
+
+sapply(Test, function(Test) sum(is.na(Test)))
+Test$ndvi_ne[is.na(Test$ndvi_ne)==T] <- median(Train$ndvi_ne, na.rm = TRUE)
+Test$ndvi_nw[is.na(Test$ndvi_nw)==T] <- median(Train$ndvi_nw, na.rm = TRUE)
+Test$ndvi_se[is.na(Test$ndvi_se)==T] <- median(Train$ndvi_se, na.rm = TRUE)
+Test$ndvi_sw[is.na(Test$ndvi_sw)==T] <- median(Train$ndvi_sw, na.rm = TRUE)
+Test$precipitation_amt_mm[is.na(Test$precipitation_amt_mm)==T] <- median(Train$precipitation_amt_mm, na.rm = TRUE)
+Test$reanalysis_air_temp_k[is.na(Test$reanalysis_air_temp_k)==T] <- median(Train$reanalysis_air_temp_k, na.rm = TRUE)
+Test$reanalysis_avg_temp_k[is.na(Test$reanalysis_avg_temp_k)==T] <- median(Train$reanalysis_avg_temp_k, na.rm = TRUE)
+Test$reanalysis_dew_point_temp_k[is.na(Test$reanalysis_dew_point_temp_k)==T] <- median(Train$reanalysis_dew_point_temp_k, na.rm = TRUE)
+Test$reanalysis_max_air_temp_k[is.na(Test$reanalysis_max_air_temp_k)==T] <- median(Train$reanalysis_max_air_temp_k, na.rm = TRUE)
+Test$reanalysis_min_air_temp_k[is.na(Test$reanalysis_min_air_temp_k)==T] <- median(Train$reanalysis_min_air_temp_k, na.rm = TRUE)
+Test$reanalysis_precip_amt_kg_per_m2[is.na(Test$reanalysis_precip_amt_kg_per_m2)==T] <- median(Train$reanalysis_precip_amt_kg_per_m2, na.rm = TRUE)
+Test$reanalysis_relative_humidity_percent[is.na(Test$reanalysis_relative_humidity_percent)==T] <- median(Train$reanalysis_relative_humidity_percent, na.rm = TRUE)
+Test$reanalysis_sat_precip_amt_mm[is.na(Test$reanalysis_sat_precip_amt_mm)==T] <- median(Train$reanalysis_sat_precip_amt_mm, na.rm = TRUE)
+Test$reanalysis_specific_humidity_g_per_kg[is.na(Test$reanalysis_specific_humidity_g_per_kg)==T] <- median(Train$reanalysis_specific_humidity_g_per_kg, na.rm = TRUE)
+Test$reanalysis_tdtr_k[is.na(Test$reanalysis_tdtr_k)==T] <- median(Train$reanalysis_tdtr_k, na.rm = TRUE)
+Test$station_avg_temp_c[is.na(Test$station_avg_temp_c)==T] <- median(Train$station_avg_temp_c, na.rm = TRUE)
+Test$station_diur_temp_rng_c[is.na(Test$station_diur_temp_rng_c)==T] <- median(Train$station_diur_temp_rng_c, na.rm = TRUE)
+Test$station_max_temp_c[is.na(Test$station_max_temp_c)==T] <- median(Train$station_max_temp_c, na.rm = TRUE)
+Test$station_min_temp_c[is.na(Test$station_min_temp_c)==T] <- median(Train$station_min_temp_c, na.rm = TRUE)
+Test$station_precip_mm[is.na(Test$station_precip_mm)==T] <- median(Train$station_precip_mm, na.rm = TRUE)
+
+```
+
+```{r}
+# Create models, mix of class learned models like ETS, ARIMA, and NNET
+
+# Model 1 - Arima
+ts_totalCases <- ts(Train$total_cases)
+Model1 <- arima(ts_totalCases)
+fcast1 <- forecast(Model1,h=24)
+checkresiduals(fcast1) 
+plot(fcast1)
+summary(fcast1)
+
+# Model 2 - ETS
+ts_totalCases <- ts(Train$total_cases)
+Model2 <- ets(ts_totalCases)
+fcast2 <- forecast(Model2,h=24)
+checkresiduals(fcast2) 
+plot(fcast2)
+summary(fcast2)
+
+# Model 3 - NNet 
+ts_totalCases <- ts(Train$total_cases)
+Model3 <- nnetar(ts_totalCases)
+fcast3 <- forecast(Model3,h=24)
+checkresiduals(fcast3)
+plot(fcast3)
+summary(fcast3)
+summary(fcast3)
+
+# Model 4 - Negative Binomial
+Model4 <- glm.nb(total_cases ~  ndvi_nw+ndvi_sw+reanalysis_min_air_temp_k+
+                   reanalysis_air_temp_k+ndvi_ne+station_min_temp_c+
+                   ndvi_se+station_diur_temp_rng_c+reanalysis_tdtr_k+
+                   reanalysis_avg_temp_k+reanalysis_specific_humidity_g_per_kg+
+                   reanalysis_dew_point_temp_k+precipitation_amt_mm+station_avg_temp_c+
+                   city+reanalysis_max_air_temp_k+reanalysis_relative_humidity_percent,
+                 data=Train)
+summary(Model4) 
+
+Actual <- Train$total_cases
+Pred_Model4 <- fitted(Model4)
+mae(Actual, Pred_Model4)
+```
+
+```{r}
+# Now write the submission file 
+
+# Negative Binomial
+Test$LN_total_cases <-	(  2.980e+02
+                          +Test$ndvi_nw *	1.391e+00
+                          +Test$ndvi_sw *	5.975e-01
+                          +Test$reanalysis_min_air_temp_k *	2.617e-02
+                          +Test$reanalysis_air_temp_k *	4.985e-01
+                          +Test$ndvi_ne *	6.610e-01
+                          +Test$station_min_temp_c *	1.721e-02
+                          +Test$ndvi_se *	-1.533e+00
+                          +Test$station_diur_temp_rng_c *	1.917e-03
+                          +Test$reanalysis_tdtr_k *	-6.671e-02
+                          +Test$reanalysis_avg_temp_k *	-2.105e-01
+                          +Test$reanalysis_specific_humidity_g_per_kg *	1.377e+00
+                          +Test$reanalysis_dew_point_temp_k *	-1.433e+00
+                          +Test$precipitation_amt_mm *	-1.055e-03
+                          +Test$station_avg_temp_c *	-3.197e-02
+                          +outer(Test$city == 'sj', 1*(1.420e+00))
+                          +Test$reanalysis_max_air_temp_k * 2.292e-02
+                          +Test$reanalysis_relative_humidity_percent * 5.023e-02)
+
+# Creating the Output file
+Test$total_cases <- round(exp(Test$LN_total_cases))
+Output$total_cases <- Test$total_cases
+
+# Create submission CSV
+write.csv(Output, 
+          file = "C:/Users/Julie/Desktop/MSDS 413/Final/Output.csv", 
+          row.names = FALSE)
+```
+
